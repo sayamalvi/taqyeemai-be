@@ -39,7 +39,13 @@ export class ResumeService {
       1. Parse the resume into structured JSON (skills, experience, education, etc.).
       2. Evaluate it against the target role: "${targetRole || 'General'}" and target job description: "${targetJobDescription || 'General'}".
       
-      For the evaluation, calculate a realistic ATS score (0-100) based on keywords, impact, formatting, and criteria.
+      To ensure absolute scoring consistency, use the following strict mathematical grading rubric (total 100 points):
+      - Keywords matching (30 points): Score based on the matching density of critical hard skills and industry keywords.
+      - Impact and metrics (30 points): Score based on the presence of measurable business results and active verbs.
+      - Formatting and structure (20 points): Score based on standard sections and clear chronological flow.
+      - Style and tone (20 points): Score based on grammatical correctness and professional action verbs.
+
+      Sum these categories to compute the final atsScore. Be objective, realistic, and strict.
       Provide a breakdown of scores, a high-level verdict, and a list of specific, actionable issues (e.g. missing keywords, passive verbs, weak bullet points) with direct suggestions for how to rewrite them.
     `;
     const userPrompt = `
@@ -53,7 +59,8 @@ export class ResumeService {
         {
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-          response_format: responseFormat
+          response_format: responseFormat,
+          temperature: 0 // Forces the model to always choose the most probable tokens for determinism
         })
 
       const result = JSON.parse(response.choices[0]!.message.content!)
