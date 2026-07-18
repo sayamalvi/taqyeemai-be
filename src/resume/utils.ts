@@ -44,36 +44,71 @@ export const responseFormat = {
                     required: ['name', 'email', 'skills', 'education', 'experience'],
                     additionalProperties: false,
                 },
-                // ATS metrics for Analysis
-                atsScore: { type: 'integer' },
-                scoreBreakdown: {
-                    type: 'object',
-                    properties: {
-                        keywords: { type: 'integer' },
-                        impact: { type: 'integer' },
-                        formatting: { type: 'integer' },
-                        style: { type: 'integer' },
-                    },
-                    required: ['keywords', 'impact', 'formatting', 'style'],
-                    additionalProperties: false,
+                // LLM Recruiter Feedback
+                interviewProbability: { type: 'integer', description: "Estimated percentage chance of landing an interview based on the resume's alignment with the role." },
+                aiVerdict: { type: 'string', description: "A one-paragraph summary from the perspective of a FAANG hiring manager." },
+                recruiterConcerns: {
+                    type: 'array',
+                    items: { type: 'string' }
                 },
-                aiVerdict: { type: 'string' },
+                missingSkills: {
+                    type: 'array',
+                    items: { type: 'string' }
+                },
                 issues: {
                     type: 'array',
                     items: {
                         type: 'object',
                         properties: {
-                            category: { type: 'string' }, // e.g. "Keywords", "Impact", "Formatting"
+                            category: { type: 'string' },
                             issue: { type: 'string' },
-                            severity: { type: 'string' }, // "Critical", "Moderate", "Low"
+                            severity: { type: 'string' },
                             fixSuggestion: { type: 'string' },
                         },
                         required: ['category', 'issue', 'severity', 'fixSuggestion'],
                         additionalProperties: false,
                     },
                 },
+                strengths: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            category: { type: 'string' },
+                            strength: { type: 'string' },
+                            detail: { type: 'string' },
+                        },
+                        required: ['category', 'strength', 'detail'],
+                        additionalProperties: false,
+                    },
+                },
+                keywords: {
+                    type: 'object',
+                    properties: {
+                        present: { type: 'array', items: { type: 'string' } },
+                        missing: { type: 'array', items: { type: 'string' } },
+                        matchRate: { type: 'integer' },
+                        total: { type: 'integer' },
+                    },
+                    required: ['present', 'missing', 'matchRate', 'total'],
+                    additionalProperties: false,
+                },
+                rewrites: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            section: { type: 'string' },
+                            original: { type: 'string' },
+                            rewritten: { type: 'string' },
+                            rationale: { type: 'string' },
+                        },
+                        required: ['section', 'original', 'rewritten', 'rationale'],
+                        additionalProperties: false,
+                    }
+                }
             },
-            required: ['parsedData', 'atsScore', 'scoreBreakdown', 'aiVerdict', 'issues'],
+            required: ['parsedData', 'interviewProbability', 'aiVerdict', 'recruiterConcerns', 'missingSkills', 'issues', 'strengths', 'keywords', 'rewrites'],
             additionalProperties: false,
         },
     },

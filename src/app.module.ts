@@ -4,6 +4,9 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { ResumeModule } from './resume/resume.module';
+import { DocumentModule } from './document/document.module';
+import { ScoringModule } from './scoring/scoring.module';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
   imports: [
@@ -13,6 +16,9 @@ import { ResumeModule } from './resume/resume.module';
     }),
     PrismaModule,
     ResumeModule,
+    DocumentModule,
+    ScoringModule,
+    LlmModule,
   ],
   controllers: [AppController],
   providers: [AppService],

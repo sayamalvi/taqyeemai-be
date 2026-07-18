@@ -10,11 +10,4 @@ export class CreateResumeDto implements Pick<Resume, 'title' | 'userId'> {
     @IsNotEmpty()
     userId: string;
 
-    @IsString()
-    @IsOptional()
-    targetRole?: string;
-
-    @IsString()
-    @IsOptional()
-    targetJobDescription?: string;
 }

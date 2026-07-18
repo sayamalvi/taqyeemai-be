@@ -1,17 +1,18 @@
 import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { CreateResumeDto } from './dto/create-resume.dto';
-import { UpdateResumeDto } from './dto/update-resume.dto';
-import OpenAI from 'openai';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { PDFParse } from 'pdf-parse';
-import { responseFormat } from './utils';
+import { AnalyzeResumeDto } from './dto/analyze-resume.dto';
+import { DocumentService } from 'src/document/document.service';
+import { LLMService } from 'src/llm/llm.service';
+import { ScoringService } from 'src/scoring/scoring.service';
 
 @Injectable()
 export class ResumeService {
-  // TODO: rename it to llm service something generic
-  private openai: OpenAI
-  constructor(private readonly prisma: PrismaService) {
-    this.openai = new OpenAI()
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly documentService: DocumentService,
+    private readonly llmService: LLMService,
+    private readonly scoringService: ScoringService) {
   }
   async create(resume: Express.Multer.File, createResumeDto: CreateResumeDto) {
     if (!resume) {
@@ -20,63 +21,19 @@ export class ResumeService {
     if (resume.mimetype !== 'application/pdf') {
       throw new BadRequestException("Only pdf allowed")
     }
-    let rawText = ""
+    const rawText = await this.documentService.extractTextFromPDF(resume.buffer)
+    const { title, userId } = createResumeDto
     try {
-      const parser = new PDFParse({
-        data: resume.buffer,
-      })
-      const result = await parser.getText()
-      rawText = result.text
-
-    } catch (error) {
-      console.error("Error parsing PDF:", error);
-      throw new HttpException('Failed to parse PDF file', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-    const { title, userId, targetJobDescription, targetRole } = createResumeDto
-    const systemPrompt = `
-      You are an expert Applicant Tracking System (ATS) auditor and career coach.
-      Your job is to analyze the candidate's raw resume text and perform two tasks:
-      1. Parse the resume into structured JSON (skills, experience, education, etc.).
-      2. Evaluate it against the target role: "${targetRole || 'General'}" and target job description: "${targetJobDescription || 'General'}".
-      
-      To ensure absolute scoring consistency, use the following strict mathematical grading rubric (total 100 points):
-      - Keywords matching (30 points): Score based on the matching density of critical hard skills and industry keywords.
-      - Impact and metrics (30 points): Score based on the presence of measurable business results and active verbs.
-      - Formatting and structure (20 points): Score based on standard sections and clear chronological flow.
-      - Style and tone (20 points): Score based on grammatical correctness and professional action verbs.
-
-      Sum these categories to compute the final atsScore. Be objective, realistic, and strict.
-      Provide a breakdown of scores, a high-level verdict, and a list of specific, actionable issues (e.g. missing keywords, passive verbs, weak bullet points) with direct suggestions for how to rewrite them.
-    `;
-    const userPrompt = `
-      Candidate Resume Text:
-      ---
-      ${rawText}
-      ---
-    `;
-    try {
-      const response = await this.openai.chat.completions.create(
-        {
-          model: "gpt-4o-mini",
-          messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-          response_format: responseFormat,
-          temperature: 0 // Forces the model to always choose the most probable tokens for determinism
-        })
-
-      const result = JSON.parse(response.choices[0]!.message.content!)
       const dbTransaction = await this.prisma.$transaction(async (transac) => {
         const resumeRecord = await transac.resume.create({
           data: {
             title, userId: 'fcf5cd02-ba0a-4f66-9759-d45ea1b56622'
           }
         })
-        const versionRecord = await transac.resumeVersion.create({ data: { resumeId: resumeRecord.id, versionNumber: 1, parsedData: result.parsedData as any } })
-
-        const analysisRecord = await transac.analysis.create({ data: { resumeVersionId: versionRecord.id, targetRole, targetJobDescription, atsScore: result.atsScore, scoreBreakdown: result.scoreBreakdown as any, aiVerdict: result.aiVerdict, issues: result.issues as any } })
+        const versionRecord = await transac.resumeVersion.create({ data: { resumeId: resumeRecord.id, versionNumber: 1, rawText, source: 'upload' } })
         return {
           resume: resumeRecord,
           version: versionRecord,
-          analysis: analysisRecord,
         };
       })
       return dbTransaction;
@@ -86,19 +43,193 @@ export class ResumeService {
     }
   }
 
-  findAll() {
-    return `This action returns all resume`;
+  async applyRewrites(resumeId: string, baseVersionId: string, rewrites: { original: string, rewritten: string }[]) {
+    // 1. Get the base version we are rewriting from
+    const baseVersion = await this.prisma.resumeVersion.findUnique({
+      where: { id: baseVersionId },
+    });
+
+    if (!baseVersion) {
+      throw new BadRequestException('Base version not found');
+    }
+
+    // 2. Perform string replacements on the raw text
+    let newRawText = baseVersion.rawText;
+
+    for (const rewrite of rewrites) {
+      // 1. Clean the AI's original string (LLMs often strip leading bullet points like "•" or "-")
+      // We strip leading non-alphanumerics so we can match the core text.
+      const coreOriginal = rewrite.original.replace(/^[^a-zA-Z0-9]+/, '').trim();
+
+      const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedOriginal = escapeRegex(coreOriginal);
+
+      // 2. Replace any whitespace in the AI string with a flexible whitespace matcher (\s+)
+      const flexibleRegexPattern = escapedOriginal.replace(/\s+/g, '\\s+');
+
+
+      // We allow optional bullet points/garbage before the core text in the actual PDF
+      const finalRegex = new RegExp(`([^a-zA-Z0-9]*)` + flexibleRegexPattern, 'i');
+
+      const isReplaced = finalRegex.test(newRawText);
+      console.log(`Replacing "${coreOriginal.substring(0, 20)}..." -> Success: ${isReplaced}`);
+
+      // 3. Perform the replacement. We preserve the leading garbage (bullet points) ($1) and append the rewritten text.
+      if (isReplaced) {
+        newRawText = newRawText.replace(finalRegex, `$1${rewrite.rewritten}`);
+      }
+    }
+
+
+    // 3. Find the current max version number for this resume
+    const maxVersion = await this.prisma.resumeVersion.aggregate({
+      where: { resumeId },
+      _max: { versionNumber: true }
+    });
+    const nextVersionNumber = (maxVersion._max.versionNumber || 0) + 1;
+
+    // 4. Create the new version
+    try {
+      const newVersion = await this.prisma.resumeVersion.create({
+        data: {
+          resumeId,
+          versionNumber: nextVersionNumber,
+          rawText: newRawText,
+          source: 'ai_rewrite',
+        }
+      });
+      return { version: newVersion };
+    } catch (error) {
+      console.error("Error applying rewrites:", error);
+      throw new HttpException('Failed to create new version', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} resume`;
+  async analyze(id: string, analyzeResumeDto: AnalyzeResumeDto) {
+    const { versionId, targetRole, targetJobDescription } = analyzeResumeDto
+    const version = await this.prisma.resumeVersion.findFirst({
+      where: { id: versionId, resumeId: id }
+    })
+
+    if (!version) {
+      throw new BadRequestException("Version not found")
+    }
+
+    // Fetch previous version to provide context to the LLM!
+    const previousVersion = await this.prisma.resumeVersion.findFirst({
+      where: { resumeId: id, versionNumber: version.versionNumber - 1 },
+      include: { analysis: true }
+    });
+
+    const previousContext = previousVersion?.analysis ? `
+      PREVIOUS VERSION CONTEXT:
+      This is Version ${version.versionNumber} of the candidate's resume.
+      In Version ${previousVersion.versionNumber}, you scored them an Interview Probability of ${previousVersion.analysis.interviewProbability}%.
+      The candidate has applied your recommended rewrites. Evaluate the new text. If the rewrites improved the impact metrics or skills, you SHOULD increase their Interview Probability proportionally.
+    ` : '';
+
+    const systemPrompt = `
+      Act as a brutally strict FAANG Hiring Manager.
+      Analyze this resume against the target role: "${targetRole || 'General'}" and job description: "${targetJobDescription || 'General'}".
+      
+      Your tasks:
+      1. Parse the resume into structured JSON.
+      2. Provide your recruiter-level feedback:
+         - Interview Probability (0-100% chance you would shortlist this candidate). BE BRUTAL. Average resumes should get 10-30%. Good resumes get 40-60%. Only the absolute top 1% of flawless resumes get 80%+.
+         - AI Verdict (1 paragraph brutal summary of their fit).
+         - Top 3 Recruiter Concerns (why you might reject them).
+         - Missing Technical Skills based on the JD.
+      3. Identify actionable issues and strengths.
+      4. Provide 'rewrites' ONLY for bullets that are genuinely weak or lack metrics. If all bullets are strong, return an empty array []. When you do rewrite, you MUST inject realistic, measurable impact metrics (like %, $, or hours saved) or extract missing technical skills from the JD and weave them in.
+         CRITICAL: The 'original' field MUST be the EXACT string verbatim from the raw text. Do NOT fix typos, do not change punctuation, and do not remove bullet points. It must be a literal copy-paste.
+    `;
+
+    const userPrompt = `
+      Candidate Resume Text:
+      ---
+      ${version.rawText}
+      ---
+      ${previousContext}
+    `;
+
+    try {
+      const result = await this.llmService.analyzeText(systemPrompt, userPrompt)
+      // CALCULATE DETERMINISTIC SCORE
+      const calculatedAtsScore = this.scoringService.calculateATS(result.parsedData, targetJobDescription || '', result.missingSkills || []);
+
+      const analysisRecord = await this.prisma.analysis.upsert({
+        where: { resumeVersionId: versionId },
+        create: {
+          resumeVersionId: versionId,
+          targetRole,
+          targetJobDescription,
+          atsScore: calculatedAtsScore,
+          interviewProbability: result.interviewProbability,
+          aiVerdict: result.aiVerdict,
+          recruiterConcerns: result.recruiterConcerns,
+          missingSkills: result.missingSkills,
+          issues: result.issues,
+          strengths: result.strengths,
+          keywords: result.keywords,
+          rewrites: result.rewrites,
+          parsedData: result.parsedData
+        },
+        update: {
+          targetRole,
+          targetJobDescription,
+          atsScore: calculatedAtsScore,
+          interviewProbability: result.interviewProbability,
+          aiVerdict: result.aiVerdict,
+          recruiterConcerns: result.recruiterConcerns,
+          missingSkills: result.missingSkills,
+          issues: result.issues,
+          strengths: result.strengths,
+          keywords: result.keywords,
+          rewrites: result.rewrites,
+          parsedData: result.parsedData
+        }
+      });
+
+
+      return { analysis: analysisRecord }
+    } catch (error) {
+      console.error("Error analyzing resume:", error);
+      throw new HttpException('Failed to analyze resume', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
-  update(id: number, updateResumeDto: UpdateResumeDto) {
-    return `This action updates a #${id} resume`;
+  async getAnalysisForVersion(versionId: string) {
+    const analysis = await this.prisma.analysis.findUnique({
+      where: { resumeVersionId: versionId },
+    });
+    return { analysis };
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} resume`;
+  async findAll() {
+    const mockUserId = 'fcf5cd02-ba0a-4f66-9759-d45ea1b56622';
+
+    return this.prisma.resume.findMany({
+      where: { userId: mockUserId },
+      include: {
+        versions: {
+          orderBy: { versionNumber: 'desc' },
+          take: 1,
+          include: { analysis: true },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async findOne(id: string) {
+    return this.prisma.resume.findUnique({
+      where: { id },
+      include: {
+        versions: {
+          orderBy: { versionNumber: 'asc' },
+          include: { analysis: true },
+        },
+      },
+    });
   }
 }

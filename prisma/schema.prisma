@@ -40,19 +40,24 @@ model ResumeVersion {
 }
 
 model Analysis {
-  id              String @id @default(uuid()) @db.Uuid
-  resumeVersionId String @unique @db.Uuid
+  id              String        @id @default(uuid()) @db.Uuid
+  resumeVersionId String        @unique @db.Uuid
+  resumeVersion   ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
 
   targetRole           String?
-  targetJobDescription String?       @db.Text
-  atsScore             Int
-  scoreBreakdown       Json // { keywords: 18, formatting: 20, impact: 10, clarity: 20 }
-  aiVerdict            String        @db.Text
+  targetJobDescription String? @db.Text
+  atsScore             Float
+  aiVerdict            String  @db.Text
+
+  scoreBreakdown       Json? // { keywords: 18, formatting: 20, impact: 10, clarity: 20 }
   parsedData           Json // structured resume: { basics, summary, experience[], education[], skills[], ... }
-  issues               Json // [{ category, issue, severity, fixSuggestion }]
-  strengths            Json? // [{ category, strength, detail }]
-  keywords             Json? // { present: [...], missing: [...], matchRate, total }
-  rewrites             Json? // [{ section, original, rewritten, rationale }]
-  createdAt            DateTime      @default(now())
-  resumeVersion        ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+  interviewProbability Int
+  recruiterConcerns    Json
+  missingSkills        Json
+
+  issues    Json // [{ category, issue, severity, fixSuggestion }]
+  strengths Json? // [{ category, strength, detail }]
+  keywords  Json? // { present: [...], missing: [...], matchRate, total }
+  rewrites  Json? // [{ section, original, rewritten, rationale }]
+  createdAt DateTime @default(now())
 }
