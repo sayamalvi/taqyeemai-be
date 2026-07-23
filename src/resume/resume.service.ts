@@ -14,7 +14,7 @@ export class ResumeService {
     private readonly llmService: LLMService,
     private readonly scoringService: ScoringService) {
   }
-  async create(resume: Express.Multer.File, createResumeDto: CreateResumeDto) {
+  async create(userId: string, resume: Express.Multer.File, createResumeDto: CreateResumeDto) {
     if (!resume) {
       throw new BadRequestException('Resume is required')
     }
@@ -22,12 +22,12 @@ export class ResumeService {
       throw new BadRequestException("Only pdf allowed")
     }
     const rawText = await this.documentService.extractTextFromPDF(resume.buffer)
-    const { title, userId } = createResumeDto
+    const { title } = createResumeDto
     try {
       const dbTransaction = await this.prisma.$transaction(async (transac) => {
         const resumeRecord = await transac.resume.create({
           data: {
-            title, userId: 'fcf5cd02-ba0a-4f66-9759-d45ea1b56622'
+            title, userId
           }
         })
         const versionRecord = await transac.resumeVersion.create({ data: { resumeId: resumeRecord.id, versionNumber: 1, rawText, source: 'upload' } })
@@ -43,7 +43,10 @@ export class ResumeService {
     }
   }
 
-  async applyRewrites(resumeId: string, baseVersionId: string, rewrites: { original: string, rewritten: string }[]) {
+  async applyRewrites(userId: string, resumeId: string, baseVersionId: string, rewrites: { original: string, rewritten: string }[]) {
+    // 0. Ensure the user owns this resume (this throws a 404 if not found)
+    await this.findOne(userId, resumeId);
+
     // 1. Get the base version we are rewriting from
     const baseVersion = await this.prisma.resumeVersion.findUnique({
       where: { id: baseVersionId },
@@ -105,7 +108,9 @@ export class ResumeService {
     }
   }
 
-  async analyze(id: string, analyzeResumeDto: AnalyzeResumeDto) {
+  async analyze(userId: string, id: string, analyzeResumeDto: AnalyzeResumeDto) {
+    await this.findOne(userId, id);
+
     const { versionId, targetRole, targetJobDescription } = analyzeResumeDto
     const version = await this.prisma.resumeVersion.findFirst({
       where: { id: versionId, resumeId: id }
@@ -198,18 +203,25 @@ export class ResumeService {
     }
   }
 
-  async getAnalysisForVersion(versionId: string) {
+  async getAnalysisForVersion(userId: string, versionId: string) {
+    const version = await this.prisma.resumeVersion.findUnique({
+      where: { id: versionId },
+      include: { resume: true }
+    });
+
+    if (!version || version.resume.userId !== userId) {
+      throw new HttpException("Analysis not found", HttpStatus.NOT_FOUND);
+    }
+
     const analysis = await this.prisma.analysis.findUnique({
       where: { resumeVersionId: versionId },
     });
     return { analysis };
   }
 
-  async findAll() {
-    const mockUserId = 'fcf5cd02-ba0a-4f66-9759-d45ea1b56622';
-
+  async findAll(userId: string) {
     return this.prisma.resume.findMany({
-      where: { userId: mockUserId },
+      where: { userId },
       include: {
         versions: {
           orderBy: { versionNumber: 'desc' },
@@ -221,9 +233,9 @@ export class ResumeService {
     });
   }
 
-  async findOne(id: string) {
-    return this.prisma.resume.findUnique({
-      where: { id },
+  async findOne(userId: string, id: string) {
+    const resume = await this.prisma.resume.findFirst({
+      where: { userId, id },
       include: {
         versions: {
           orderBy: { versionNumber: 'asc' },
@@ -231,5 +243,9 @@ export class ResumeService {
         },
       },
     });
+    if (!resume) {
+      throw new HttpException("Resume not found", HttpStatus.NOT_FOUND)
+    }
+    return resume
   }
 }

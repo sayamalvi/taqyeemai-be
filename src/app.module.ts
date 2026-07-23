@@ -7,6 +7,7 @@ import { ResumeModule } from './resume/resume.module';
 import { DocumentModule } from './document/document.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { LlmModule } from './llm/llm.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { LlmModule } from './llm/llm.module';
     DocumentModule,
     ScoringModule,
     LlmModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
