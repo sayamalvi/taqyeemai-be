@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, UseGuards, Req, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, UseGuards, Req, Request, Header } from '@nestjs/common';
 import { ResumeService } from './resume.service';
 import { CreateResumeDto } from './dto/create-resume.dto';
 import { UpdateResumeDto } from './dto/update-resume.dto';
@@ -46,6 +46,21 @@ export class ResumeController {
   @Post(':id/versions/:versionId/latex')
   generateLatex(@Request() req, @Param('id') id: string, @Param('versionId') versionId: string) {
     return this.resumeService.generateLatex(req.user.userId, id, versionId);
+  }
+
+  @Post(':id/versions/:versionId/download')
+  @Header('Content-Type', 'application/pdf')
+  downloadPdf(@Request() req, @Param('id') id: string, @Param('versionId') versionId: string) {
+    const authHeader = req.headers['authorization'];
+    const cookieHeader = req.headers['cookie'];
+
+    return this.resumeService.downloadPdf(
+      req.user.userId,
+      id,
+      versionId,
+      authHeader,
+      cookieHeader
+    );
   }
 
 }

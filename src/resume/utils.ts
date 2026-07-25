@@ -12,6 +12,9 @@ export const responseFormat = {
                     properties: {
                         name: { type: 'string' },
                         email: { type: 'string' },
+                        phone: { type: 'string' },
+                        github: { type: 'string' },
+                        linkedin: { type: 'string' },
                         skills: { type: 'array', items: { type: 'string' } },
                         education: {
                             type: 'array',
@@ -40,8 +43,21 @@ export const responseFormat = {
                                 additionalProperties: false,
                             },
                         },
+                        projects: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    name: { type: 'string' },
+                                    duration: { type: 'string' },
+                                    bullets: { type: 'array', items: { type: 'string' } },
+                                },
+                                required: ['name', 'duration', 'bullets'],
+                                additionalProperties: false,
+                            },
+                        },
                     },
-                    required: ['name', 'email', 'skills', 'education', 'experience'],
+                    required: ['name', 'email', 'phone', 'github', 'linkedin', 'skills', 'education', 'experience', 'projects'],
                     additionalProperties: false,
                 },
                 // LLM Recruiter Feedback

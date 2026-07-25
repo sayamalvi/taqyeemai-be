@@ -2,4 +2,5 @@ allowBuilds:
   '@prisma/engines': false
   bcrypt: false
   prisma: false
+  puppeteer: false
   unrs-resolver: false
