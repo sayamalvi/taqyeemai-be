@@ -43,4 +43,9 @@ export class ResumeController {
     return this.resumeService.analyze(req.user.userId, id, analyzeResumeDto)
   }
 
+  @Post(':id/versions/:versionId/latex')
+  generateLatex(@Request() req, @Param('id') id: string, @Param('versionId') versionId: string) {
+    return this.resumeService.generateLatex(req.user.userId, id, versionId);
+  }
+
 }

@@ -57,6 +57,7 @@ model Analysis {
   recruiterConcerns    Json
   missingSkills        Json
 
+  latexCode String?  @db.Text
   issues    Json // [{ category, issue, severity, fixSuggestion }]
   strengths Json? // [{ category, strength, detail }]
   keywords  Json? // { present: [...], missing: [...], matchRate, total }

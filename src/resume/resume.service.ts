@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateResumeDto } from './dto/create-resume.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AnalyzeResumeDto } from './dto/analyze-resume.dto';
@@ -248,4 +248,36 @@ export class ResumeService {
     }
     return resume
   }
+
+  async generateLatex(userId: string, resumeId: string, versionId: string) {
+    // 1. Fetch the analysis and verify ownership
+    const analysis = await this.prisma.analysis.findUnique({
+      where: { resumeVersionId: versionId },
+      include: { resumeVersion: { include: { resume: true } } }
+    });
+
+    if (!analysis || analysis.resumeVersion.resume.userId !== userId) {
+      throw new NotFoundException('Analysis not found or unauthorized');
+    }
+
+    // 2. Return cached LaTeX if we already generated it
+    if (analysis.latexCode) {
+      return { latexCode: analysis.latexCode };
+    }
+
+    // 3. Generate it using the LLM
+    const latexCode = await this.llmService.generateLatex(analysis.parsedData);
+
+    // 4. Clean up any markdown blocks the LLM might have hallucinated
+    const cleanedCode = latexCode.replace(/```latex\n/g, '').replace(/```/g, '').trim();
+
+    // 5. Save to database
+    await this.prisma.analysis.update({
+      where: { resumeVersionId: versionId },
+      data: { latexCode: cleanedCode }
+    });
+
+    return { latexCode: cleanedCode };
+  }
+
 }
