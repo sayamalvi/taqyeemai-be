@@ -1,16 +1,24 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, UseGuards, Req, Request, Header } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseInterceptors, UploadedFile, UseGuards, Request, Header } from '@nestjs/common';
 import { ResumeService } from './resume.service';
 import { CreateResumeDto } from './dto/create-resume.dto';
-import { UpdateResumeDto } from './dto/update-resume.dto';
 import { FileInterceptor } from '@nestjs/platform-express'
 import { AnalyzeResumeDto } from './dto/analyze-resume.dto';
 import { ApplyRewritesDto } from './dto/apply-rewrites.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { ExportsService } from 'src/exports/exports.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('resume')
 export class ResumeController {
-  constructor(private readonly resumeService: ResumeService) { }
+  constructor(
+    private readonly resumeService: ResumeService,
+    private readonly exportService: ExportsService
+  ) { }
+
+  @Get()
+  findAll(@Request() req) {
+    return this.resumeService.findAll(req.user.userId)
+  }
 
   @Post()
   @UseInterceptors(FileInterceptor('resume'))
@@ -18,9 +26,9 @@ export class ResumeController {
     return this.resumeService.create(req.user.userId, resume, createResumeDto);
   }
 
-  @Get()
-  findAll(@Request() req) {
-    return this.resumeService.findAll(req.user.userId)
+  @Post(':id/analyze')
+  analyze(@Request() req, @Param('id') id: string, @Body() analyzeResumeDto: AnalyzeResumeDto) {
+    return this.resumeService.analyze(req.user.userId, id, analyzeResumeDto)
   }
 
   @Get(':id')
@@ -38,15 +46,6 @@ export class ResumeController {
     return this.resumeService.getAnalysisForVersion(req.user.userId, versionId)
   }
 
-  @Post(':id/analyze')
-  analyze(@Request() req, @Param('id') id: string, @Body() analyzeResumeDto: AnalyzeResumeDto) {
-    return this.resumeService.analyze(req.user.userId, id, analyzeResumeDto)
-  }
-
-  @Post(':id/versions/:versionId/latex')
-  generateLatex(@Request() req, @Param('id') id: string, @Param('versionId') versionId: string) {
-    return this.resumeService.generateLatex(req.user.userId, id, versionId);
-  }
 
   @Post(':id/versions/:versionId/download')
   @Header('Content-Type', 'application/pdf')
@@ -54,7 +53,7 @@ export class ResumeController {
     const authHeader = req.headers['authorization'];
     const cookieHeader = req.headers['cookie'];
 
-    return this.resumeService.downloadPdf(
+    return this.exportService.downloadPdf(
       req.user.userId,
       id,
       versionId,

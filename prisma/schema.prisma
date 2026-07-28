@@ -48,19 +48,17 @@ model Analysis {
 
   targetRole           String?
   targetJobDescription String? @db.Text
-  atsScore             Float
   aiVerdict            String  @db.Text
 
-  scoreBreakdown       Json? // { keywords: 18, formatting: 20, impact: 10, clarity: 20 }
-  parsedData           Json // structured resume: { basics, summary, experience[], education[], skills[], ... }
-  interviewProbability Int
-  recruiterConcerns    Json
-  missingSkills        Json
+  scoreBreakdown    Json? // { keywords: 18, formatting: 20, impact: 10, clarity: 20 }
+  parsedData        Json // structured resume: { basics, summary, experience[], education[], skills[], ... }
+  recruiterConcerns Json
+  missingSkills     Json
 
-  latexCode String?  @db.Text
-  issues    Json // [{ category, issue, severity, fixSuggestion }]
-  strengths Json? // [{ category, strength, detail }]
-  keywords  Json? // { present: [...], missing: [...], matchRate, total }
-  rewrites  Json? // [{ section, original, rewritten, rationale }]
-  createdAt DateTime @default(now())
+  resumeHealthScore Float
+  issues            Json // [{ category, issue, severity, fixSuggestion }]
+  strengths         Json? // [{ category, strength, detail }]
+  keywords          Json? // { present: [...], missing: [...], matchRate, total }
+  rewrites          Json? // [{ section, original, rewritten, rationale }]
+  createdAt         DateTime @default(now())
 }

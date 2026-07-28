@@ -1,3 +1,5 @@
+import { Logger } from "@nestjs/common";
+
 export const responseFormat = {
     type: 'json_schema',
     json_schema: {
@@ -61,7 +63,17 @@ export const responseFormat = {
                     additionalProperties: false,
                 },
                 // LLM Recruiter Feedback
-                interviewProbability: { type: 'integer', description: "Estimated percentage chance of landing an interview based on the resume's alignment with the role." },
+                resumeHealthScore: { type: 'integer', description: "A score from 0 to 100 representing the overall health, impact, and ATS-readiness of the resume." },
+                scoreBreakdown: {
+                    type: 'object',
+                    properties: {
+                        impact: { type: 'integer' },
+                        skills: { type: 'integer' },
+                        formatting: { type: 'integer' },
+                    },
+                    required: ['impact', 'skills', 'formatting'],
+                    additionalProperties: false,
+                },
                 aiVerdict: { type: 'string', description: "A one-paragraph summary from the perspective of a FAANG hiring manager." },
                 recruiterConcerns: {
                     type: 'array',
@@ -124,8 +136,69 @@ export const responseFormat = {
                     }
                 }
             },
-            required: ['parsedData', 'interviewProbability', 'aiVerdict', 'recruiterConcerns', 'missingSkills', 'issues', 'strengths', 'keywords', 'rewrites'],
+            required: ['parsedData', 'resumeHealthScore', 'scoreBreakdown', 'aiVerdict', 'recruiterConcerns', 'missingSkills', 'issues', 'strengths', 'keywords', 'rewrites'],
             additionalProperties: false,
         },
     },
 } as const
+
+export const criticResponseFormat = {
+    type: 'json_schema',
+    json_schema: {
+        name: 'critic_evaluation',
+        strict: true,
+        schema: {
+            type: 'object',
+            properties: {
+                filteredRewrites: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            section: { type: 'string' },
+                            original: { type: 'string' },
+                            rewritten: { type: 'string' },
+                            rationale: { type: 'string' },
+                        },
+                        required: ['section', 'original', 'rewritten', 'rationale'],
+                        additionalProperties: false,
+                    }
+                }
+            },
+            required: ['filteredRewrites'],
+            additionalProperties: false,
+        },
+    },
+} as const
+
+
+export function applyRewritesToText(
+    rawText: string,
+    rewrites: { original: string, rewritten: string }[],
+    logger: Logger
+): string {
+    let newRawText = rawText;
+    for (const rewrite of rewrites) {
+        // 1. Clean the AI's original string (LLMs often strip leading bullet points like "•" or "-")
+        // We strip leading non-alphanumerics so we can match the core text.
+        const coreOriginal = rewrite.original.replace(/^[^a-zA-Z0-9]+/, '').trim();
+
+        const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedOriginal = escapeRegex(coreOriginal);
+
+        // 2. Replace any whitespace in the AI string with a flexible whitespace matcher (\s+)
+        const flexibleRegexPattern = escapedOriginal.replace(/\s+/g, '\\s+');
+
+        // We allow optional bullet points/garbage before the core text in the actual PDF
+        const finalRegex = new RegExp(`([^a-zA-Z0-9]*)` + flexibleRegexPattern, 'i');
+
+        const isReplaced = finalRegex.test(newRawText);
+        logger.log(`Replacing "${coreOriginal.substring(0, 20)}..." -> Success: ${isReplaced}`);
+
+        // 3. Perform the replacement. We preserve the leading garbage (bullet points) ($1) and append the rewritten text.
+        if (isReplaced) {
+            newRawText = newRawText.replace(finalRegex, `$1${rewrite.rewritten}`);
+        }
+    }
+    return newRawText;
+}
