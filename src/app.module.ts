@@ -17,11 +17,6 @@ import { ExportsModule } from './exports/exports.module';
       isGlobal: true,
       envFilePath: process.env.NODE_ENV === 'production' ? '.env.prod' : '.env.dev',
     }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty', options: { singleLine: true } } : undefined,
-      }
-    }),
     PrismaModule,
     ResumeModule,
     DocumentModule,
