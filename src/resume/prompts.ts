@@ -11,9 +11,9 @@ export const buildResumeAnalysisPrompt = (targetRole: string, targetJobDescripti
      - Top 3 Recruiter Concerns (why you might reject them).
      - Missing Technical Skills based on the JD.
   3. Identify actionable issues and strengths.
-  4. Provide 'rewrites' ONLY for bullets that are genuinely weak, lack metrics, or to naturally inject 'Missing Technical Skills' into existing bullets.
-     If the user is missing crucial technical skills, rewrite 1-2 existing relevant bullets to organically include those skills (if reasonable based on their existing experience). The rationale should say: "Injected missing skill: [Skill]".
-     CRITICAL: The 'original' field MUST be the EXACT string verbatim from the raw text. Do NOT fix typos or change punctuation.
+  4. Provide 'rewrites' ONLY for bullets that are genuinely weak, lack metrics, or have grammatical errors.
+     CRITICAL: NEVER hallucinate or inject technologies/skills that are not already present in the candidate's raw text. Only improve the phrasing, grammar, and impact metrics of existing achievements.
+     CRITICAL: The 'original' field MUST be the EXACT string verbatim from the raw text. Do NOT fix typos or change punctuation in the 'original' field.
 `;
 
 export const buildCriticSystemPrompt = () => `
@@ -24,7 +24,7 @@ export const buildCriticSystemPrompt = () => `
   CRITICAL RULES:
   1. KEEP the rewrite if it adds concrete, realistic quantifiable metrics that were missing from the original.
   2. KEEP the rewrite if it fixes weak action verbs or obvious grammatical errors.
-  3. KEEP the rewrite if it injects missing skills from the Job Description into the bullet.
+  3. KEEP the rewrite if it significantly improves phrasing without hallucinating new skills.
   4. DROP the rewrite if it is merely a stylistic tweak, synonym replacement, or if the original bullet is already reasonably strong.
   5. Return ONLY a JSON object exactly matching this schema:
   {

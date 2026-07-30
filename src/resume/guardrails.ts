@@ -28,15 +28,17 @@ export function filterDuplicateRewrites(newRewrites: Rewrite[], previousRewrites
         return newRewrites;
     }
 
-    // Hash the exact strings that were already rewritten and applied
-    const previousRewrittenNormalized = previousRewrites.map(r => normalize(r.rewritten));
+    // Hash ALL strings that the AI previously targeted or created
+    const previousTargetedNormalized = previousRewrites.flatMap(r => [
+        normalize(r.original),
+        normalize(r.rewritten)
+    ]);
 
     const filtered = newRewrites.filter(rewrite => {
         const newOriginalNormalized = normalize(rewrite.original);
 
-        // If the AI is trying to target a string that perfectly matches 
-        // what it wrote last time, it's looping. Drop it.
-        const isDuplicate = previousRewrittenNormalized.includes(newOriginalNormalized);
+        // If the AI is trying to target a string it already gave feedback on, it's looping. Drop it.
+        const isDuplicate = previousTargetedNormalized.includes(newOriginalNormalized);
 
         return !isDuplicate;
     });
