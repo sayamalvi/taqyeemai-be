@@ -128,10 +128,15 @@ export const responseFormat = {
                         properties: {
                             section: { type: 'string' },
                             original: { type: 'string' },
+                            // CoT Step 1: Grounding in reality
+                            existing_skills_found: { type: 'string', description: "List the technical skills explicitly mentioned in the original bullet. If none, write 'None'." },
+                            // CoT Step 2: Formulating the plan
+                            flaw_analysis: { type: 'string', description: "Analyze what is weak about the original bullet and how it can be improved using ONLY the existing skills." },
                             rewritten: { type: 'string' },
                             rationale: { type: 'string' },
                         },
-                        required: ['section', 'original', 'rewritten', 'rationale'],
+                        // Ensure it outputs in this exact order
+                        required: ['section', 'original', 'existing_skills_found', 'flaw_analysis', 'rewritten', 'rationale'],
                         additionalProperties: false,
                     }
                 }
@@ -157,10 +162,13 @@ export const criticResponseFormat = {
                         properties: {
                             section: { type: 'string' },
                             original: { type: 'string' },
+                            // ADD IT HERE:
+                            verification_check: { type: 'string', description: "Verify that the rewritten bullet does not hallucinate new skills." },
                             rewritten: { type: 'string' },
                             rationale: { type: 'string' },
                         },
-                        required: ['section', 'original', 'rewritten', 'rationale'],
+                        // AND UPDATE THE REQUIRED ARRAY HERE:
+                        required: ['section', 'original', 'verification_check', 'rewritten', 'rationale'],
                         additionalProperties: false,
                     }
                 }

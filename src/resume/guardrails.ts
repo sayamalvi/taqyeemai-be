@@ -1,6 +1,9 @@
 export interface Rewrite {
     section: string;
     original: string;
+    existing_skills_found?: string;
+    flaw_analysis?: string;
+    verification_check?: string;
     rewritten: string;
     rationale: string;
 }

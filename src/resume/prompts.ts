@@ -14,6 +14,13 @@ export const buildResumeAnalysisPrompt = (targetRole: string, targetJobDescripti
   4. Provide 'rewrites' ONLY for bullets that are genuinely weak, lack metrics, or have grammatical errors.
      CRITICAL: NEVER hallucinate or inject technologies/skills that are not already present in the candidate's raw text. Only improve the phrasing, grammar, and impact metrics of existing achievements.
      CRITICAL: The 'original' field MUST be the EXACT string verbatim from the raw text. Do NOT fix typos or change punctuation in the 'original' field.
+  5. FEW-SHOT EXAMPLE OF A VALID REWRITE:
+     "original": "Did frontend coding.",
+     "existing_skills_found": "Frontend coding",
+     "flaw_analysis": "The bullet is extremely vague and lacks impact metrics.",
+     "rewritten": "Engineered frontend architecture and led code reviews to improve system performance.",
+     "rationale": "Improved action verbs and phrasing without adding hallucinated technical frameworks."
+
 `;
 
 export const buildCriticSystemPrompt = () => `
@@ -32,6 +39,11 @@ export const buildCriticSystemPrompt = () => `
         { "section": "...", "original": "...", "rewritten": "...", "rationale": "Why this rewrite was absolutely strictly necessary." }
      ]
   }
+  6. FEW-SHOT EXAMPLE:
+     "original": "Built a website.",
+     "verification_check": "The rewritten bullet claims the candidate used React and Node.js, but those were not in the original text. Hallucination detected.",
+     -> Action: DROP THE REWRITE.
+
 `;
 
 export const buildPreviousContext = (currentVersion: number, previousVersion: number, previousScore: number) => `
