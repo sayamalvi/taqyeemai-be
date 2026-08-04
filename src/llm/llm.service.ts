@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
-import { responseFormat } from 'src/resume/utils';
+import { analystResponseFormat } from 'src/resume/utils';
 
 export interface LLMProvider {
     analyze(systemPrompt: string, userPrompt: string, schema: any): Promise<any>
@@ -54,7 +54,7 @@ export class GroqProvider implements LLMProvider {
     }
 
     async generateText(systemPrompt: string, userPrompt: string): Promise<string> {
-        const groqSystemPrompt = systemPrompt + `\n\nCRITICAL: You MUST return ONLY valid JSON. The JSON must exactly match this schema: ${JSON.stringify(responseFormat.json_schema.schema)}`;
+        const groqSystemPrompt = systemPrompt + `\n\nCRITICAL: You MUST return ONLY valid JSON. The JSON must exactly match this schema: ${JSON.stringify(analystResponseFormat.json_schema.schema)}`;
         const response = await this.client.chat.completions.create({
             model: "llama-3.3-70b-versatile",
             messages: [{ role: "system", content: groqSystemPrompt }, { role: "user", content: userPrompt }],

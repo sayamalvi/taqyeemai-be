@@ -4,14 +4,16 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AnalyzeResumeDto } from './dto/analyze-resume.dto';
 import { DocumentService } from 'src/document/document.service';
 import { LLMService } from 'src/llm/llm.service';
-import { responseFormat, criticResponseFormat, applyRewritesToText } from './utils';
-import { filterDuplicateRewrites } from './guardrails';
+import { ScoringService } from 'src/scoring/scoring.service';
+import { analystResponseFormat, rewriterResponseFormat, applyRewritesToText } from './utils';
+import { runProgrammaticGuardrails } from './guardrails';
+import { Rewrite, AnalystResponse, RewriterResponse, AnalysisResult } from './types';
 import {
-  buildCriticSystemPrompt,
-  buildCriticUserPrompt,
+  buildAnalystSystemPrompt,
+  buildRewriterSystemPrompt,
   buildPreviousContext,
-  buildResumeAnalysisPrompt,
-  buildResumeUserPrompt
+  buildResumeUserPrompt,
+  buildRewriterUserPrompt
 } from './prompts';
 
 @Injectable()
@@ -20,7 +22,8 @@ export class ResumeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
-    private readonly llmService: LLMService
+    private readonly llmService: LLMService,
+    private readonly scoringService: ScoringService
   ) { }
 
   async create(userId: string, resume: Express.Multer.File, createResumeDto: CreateResumeDto) {
@@ -52,7 +55,7 @@ export class ResumeService {
 
       })
       return dbTransaction;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("Error creating resume", error.stack);
       throw new InternalServerErrorException('Failed to create resume');
     }
@@ -106,8 +109,8 @@ export class ResumeService {
 
     if (
       existingAnalysis &&
-      existingAnalysis.targetRole === (targetRole || 'General') &&
-      existingAnalysis.targetJobDescription === (targetJobDescription || 'General')
+      existingAnalysis.targetRole === targetRole &&
+      existingAnalysis.targetJobDescription === targetJobDescription
     ) {
       this.logger.log("Returning existing deterministic analysis.");
       return { analysis: existingAnalysis };
@@ -117,8 +120,8 @@ export class ResumeService {
       // 1. Gather Context
       const { version, previousContext, previousRewrites } = await this.buildContext(versionId, id);
 
-      // 2. Execute AI Loop
-      const analysisData = await this.runAgenticLoop(targetRole || 'General', targetJobDescription || 'General', version.rawText, previousContext, previousRewrites);
+      // 2. Execute AI Loop (Extract-Generate-Validate Pipeline)
+      const analysisData = await this.runAgenticLoop(targetRole, targetJobDescription, version.rawText, previousContext, previousRewrites);
 
       // 3. Save to Database
       const analysisRecord = await this.saveAnalysis(versionId, targetRole, targetJobDescription, analysisData);
@@ -175,9 +178,10 @@ export class ResumeService {
     }
     return resume
   }
+
   // --- PRIVATE HELPER METHODS FOR ANALYSIS ---
 
-  private async buildContext(versionId: string, resumeId: string) {
+  private async buildContext(versionId: string, resumeId: string): Promise<{ version: any, previousContext: string, previousRewrites: Rewrite[] }> {
     const version = await this.prisma.resumeVersion.findFirst({
       where: { id: versionId, resumeId }
     });
@@ -186,6 +190,7 @@ export class ResumeService {
       throw new BadRequestException("Version not found");
     }
 
+    // Fetch the immediately previous version for the score context prompt
     const previousVersion = await this.prisma.resumeVersion.findFirst({
       where: { resumeId, versionNumber: version.versionNumber - 1 },
       include: { analysis: true }
@@ -195,48 +200,70 @@ export class ResumeService {
       ? buildPreviousContext(version.versionNumber, previousVersion.versionNumber, previousVersion.analysis.resumeHealthScore)
       : '';
 
-    const previousRewrites = previousVersion?.analysis?.rewrites as any[] || [];
+    // Accumulate rewrites from ALL prior versions so the duplicate filter
+    // catches loops across the entire version history, not just v(N-1)
+    const allPriorVersions = await this.prisma.resumeVersion.findMany({
+      where: { resumeId, versionNumber: { lt: version.versionNumber } },
+      include: { analysis: true }
+    });
+
+    const previousRewrites = allPriorVersions.flatMap(
+      v => (v.analysis?.rewrites as unknown as Rewrite[]) || []
+    );
+
+    this.logger.log(`[Context] Loaded ${previousRewrites.length} accumulated rewrites from ${allPriorVersions.length} prior version(s).`);
 
     return { version, previousContext, previousRewrites };
   }
 
-  private async runAgenticLoop(targetRole: string, targetJobDescription: string, rawText: string, previousContext: string, previousRewrites: any[]) {
-    const systemPrompt = buildResumeAnalysisPrompt(targetRole || 'General', targetJobDescription || 'General');
-    const userPrompt = buildResumeUserPrompt(rawText, previousContext);
+  private async runAgenticLoop(targetRole: string, targetJobDescription: string, rawText: string, previousContext: string, previousRewrites: Rewrite[]): Promise<AnalysisResult> {
 
-    // 1. Actor Phase
-    const analysisData = await this.llmService.analyzeText(systemPrompt, userPrompt, responseFormat);
+    // STEP 1: ANALYST (Extract + Evaluate)
+    this.logger.log(`[Step 1: Analyst] Parsing and evaluating resume...`);
+    const analystSystemPrompt = buildAnalystSystemPrompt(targetRole, targetJobDescription);
+    const analystUserPrompt = buildResumeUserPrompt(rawText, previousContext);
 
-    // 2. Guardrail Phase
-    if (analysisData.rewrites && analysisData.rewrites.length > 0) {
-      const originalCount = analysisData.rewrites.length;
-      analysisData.rewrites = filterDuplicateRewrites(analysisData.rewrites as any, previousRewrites);
-      this.logger.log(`[Guardrail] Blocked ${originalCount - analysisData.rewrites.length} duplicate rewrites.`);
+    const analystData = await this.llmService.analyzeText(analystSystemPrompt, analystUserPrompt, analystResponseFormat) as AnalystResponse;
+    const knownSkills = analystData.parsedData.skills || [];
 
-      // 3. Critic Phase
-      if (analysisData.rewrites.length > 0) {
-        const criticSystemPrompt = buildCriticSystemPrompt();
-        const criticUserPrompt = buildCriticUserPrompt(analysisData.rewrites);
+    let finalRewrites: Rewrite[] = [];
 
-        try {
-          this.logger.log(`[Actor] Generated ${analysisData.rewrites.length} rewrites. Passing to Critic...`);
-          const criticResponse = await this.llmService.analyzeText(criticSystemPrompt, criticUserPrompt, criticResponseFormat);
-          const filteredCount = criticResponse.filteredRewrites?.length || 0;
-          this.logger.log(`[Critic] Kept ${filteredCount} out of ${analysisData.rewrites.length} rewrites.`);
+    // STEP 2: REWRITER (Generate)
+    if (analystData.issues && analystData.issues.length > 0) {
+      this.logger.log(`[Step 2: Rewriter] Generating rewrites grounded in ${knownSkills.length} known skills...`);
+      const rewriterSystemPrompt = buildRewriterSystemPrompt();
+      const rewriterUserPrompt = buildRewriterUserPrompt(rawText, knownSkills);
 
-          analysisData.rewrites = criticResponse.filteredRewrites || [];
-        } catch (e) {
-          this.logger.error("[Critic] Failed to evaluate rewrites, falling back to original.", e);
-        }
+      try {
+        const rewriterData = await this.llmService.analyzeText(rewriterSystemPrompt, rewriterUserPrompt, rewriterResponseFormat) as RewriterResponse;
+
+        // STEP 3: GUARDRAILS (Validate)
+        this.logger.log(`[Step 3: Guardrails] Validating ${rewriterData.rewrites?.length || 0} rewrites...`);
+        const guardrailResult = await runProgrammaticGuardrails(rewriterData.rewrites || [], rawText, knownSkills, previousRewrites, this.logger, this.llmService);
+        finalRewrites = guardrailResult.validatedRewrites;
+
+      } catch (e: any) {
+        this.logger.error(`[Rewriter] Failed to generate rewrites: ${e.message}`, e.stack);
       }
     } else {
-      this.logger.log("[Actor] Generated 0 rewrites. The resume must be flawless (or the prompt is too strict).");
+      this.logger.log(`[Step 2/3 Skipped] No issues identified by Analyst. Must be a flawless resume.`);
     }
 
-    return analysisData;
+    // STEP 4: HYBRID SCORING
+    this.logger.log(`[Step 4: Scoring] Calculating hybrid score...`);
+    const deterministicScore = this.scoringService.calculateDeterministicScore(analystData.parsedData, targetJobDescription, analystData.missingSkills);
+    const hybridScore = this.scoringService.calculateHybridScore(deterministicScore, analystData.resumeHealthScore);
+
+    this.logger.log(`[Score] Deterministic: ${deterministicScore}, LLM: ${analystData.resumeHealthScore} -> Hybrid: ${hybridScore}`);
+
+    return {
+      ...analystData,
+      resumeHealthScore: hybridScore,
+      rewrites: finalRewrites
+    };
   }
 
-  private async saveAnalysis(versionId: string, targetRole: string | undefined, targetJobDescription: string | undefined, analysisData: any) {
+  private async saveAnalysis(versionId: string, targetRole: string | undefined, targetJobDescription: string | undefined, analysisData: AnalysisResult) {
     const analysisRecord = await this.prisma.analysis.upsert({
       where: { resumeVersionId: versionId },
       create: {
@@ -246,11 +273,11 @@ export class ResumeService {
         aiVerdict: analysisData.aiVerdict,
         recruiterConcerns: analysisData.recruiterConcerns,
         missingSkills: analysisData.missingSkills,
-        issues: analysisData.issues,
-        strengths: analysisData.strengths,
-        keywords: analysisData.keywords,
-        rewrites: analysisData.rewrites,
-        parsedData: analysisData.parsedData,
+        issues: analysisData.issues as any,
+        strengths: analysisData.strengths as any,
+        keywords: analysisData.keywords as any,
+        rewrites: analysisData.rewrites as any,
+        parsedData: analysisData.parsedData as any,
         resumeHealthScore: analysisData.resumeHealthScore
       },
       update: {
@@ -259,11 +286,11 @@ export class ResumeService {
         aiVerdict: analysisData.aiVerdict,
         recruiterConcerns: analysisData.recruiterConcerns,
         missingSkills: analysisData.missingSkills,
-        issues: analysisData.issues,
-        strengths: analysisData.strengths,
-        keywords: analysisData.keywords,
-        rewrites: analysisData.rewrites,
-        parsedData: analysisData.parsedData,
+        issues: analysisData.issues as any,
+        strengths: analysisData.strengths as any,
+        keywords: analysisData.keywords as any,
+        rewrites: analysisData.rewrites as any,
+        parsedData: analysisData.parsedData as any,
         resumeHealthScore: analysisData.resumeHealthScore
       }
     });

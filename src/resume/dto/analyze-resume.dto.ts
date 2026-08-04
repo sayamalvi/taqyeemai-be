@@ -6,10 +6,10 @@ export class AnalyzeResumeDto {
     versionId: string;
 
     @IsString()
-    @IsOptional()
-    targetRole?: string;
+    @IsNotEmpty()
+    targetRole: string;
 
     @IsString()
-    @IsOptional()
-    targetJobDescription?: string;
+    @IsNotEmpty()
+    targetJobDescription: string;
 }

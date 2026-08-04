@@ -1,9 +1,9 @@
 import { Logger } from "@nestjs/common";
 
-export const responseFormat = {
+export const analystResponseFormat = {
     type: 'json_schema',
     json_schema: {
-        name: 'resume_evaluation',
+        name: 'analyst_evaluation',
         strict: true,
         schema: {
             type: 'object',
@@ -63,15 +63,16 @@ export const responseFormat = {
                     additionalProperties: false,
                 },
                 // LLM Recruiter Feedback
-                resumeHealthScore: { type: 'integer', description: "A score from 0 to 100 representing the overall health, impact, and ATS-readiness of the resume." },
+                resumeHealthScore: { type: 'integer', description: "A score from 0 to 100 representing the qualitative health, impact, and clarity of the resume." },
                 scoreBreakdown: {
                     type: 'object',
                     properties: {
                         impact: { type: 'integer' },
                         skills: { type: 'integer' },
                         formatting: { type: 'integer' },
+                        clarity: { type: 'integer' }
                     },
-                    required: ['impact', 'skills', 'formatting'],
+                    required: ['impact', 'skills', 'formatting', 'clarity'],
                     additionalProperties: false,
                 },
                 aiVerdict: { type: 'string', description: "A one-paragraph summary from the perspective of a FAANG hiring manager." },
@@ -121,6 +122,21 @@ export const responseFormat = {
                     required: ['present', 'missing', 'matchRate', 'total'],
                     additionalProperties: false,
                 },
+            },
+            required: ['parsedData', 'resumeHealthScore', 'scoreBreakdown', 'aiVerdict', 'recruiterConcerns', 'missingSkills', 'issues', 'strengths', 'keywords'],
+            additionalProperties: false,
+        },
+    },
+} as const
+
+export const rewriterResponseFormat = {
+    type: 'json_schema',
+    json_schema: {
+        name: 'rewriter_evaluation',
+        strict: true,
+        schema: {
+            type: 'object',
+            properties: {
                 rewrites: {
                     type: 'array',
                     items: {
@@ -129,51 +145,42 @@ export const responseFormat = {
                             section: { type: 'string' },
                             original: { type: 'string' },
                             // CoT Step 1: Grounding in reality
-                            existing_skills_found: { type: 'string', description: "List the technical skills explicitly mentioned in the original bullet. If none, write 'None'." },
+                            existing_skills_found: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: "List the technical skills explicitly mentioned in the original bullet. Must be a subset of the candidate's known skills."
+                            },
                             // CoT Step 2: Formulating the plan
-                            flaw_analysis: { type: 'string', description: "Analyze what is weak about the original bullet and how it can be improved using ONLY the existing skills." },
+                            flaw_analysis: { type: 'string', description: "Analyze what is weak about the original bullet and how it can be improved." },
+                            // CoT Step 3: Self-verification
+                            self_verification: { type: 'string', description: "Verify you are NOT injecting any new technical skills that are not in the candidate's known skills list." },
                             rewritten: { type: 'string' },
                             rationale: { type: 'string' },
                         },
-                        // Ensure it outputs in this exact order
-                        required: ['section', 'original', 'existing_skills_found', 'flaw_analysis', 'rewritten', 'rationale'],
+                        // Ensure it outputs in this exact order for CoT
+                        required: ['section', 'original', 'existing_skills_found', 'flaw_analysis', 'self_verification', 'rewritten', 'rationale'],
                         additionalProperties: false,
                     }
                 }
             },
-            required: ['parsedData', 'resumeHealthScore', 'scoreBreakdown', 'aiVerdict', 'recruiterConcerns', 'missingSkills', 'issues', 'strengths', 'keywords', 'rewrites'],
+            required: ['rewrites'],
             additionalProperties: false,
         },
     },
 } as const
 
-export const criticResponseFormat = {
+export const validationResponseFormat = {
     type: 'json_schema',
     json_schema: {
-        name: 'critic_evaluation',
+        name: 'skill_validation',
         strict: true,
         schema: {
             type: 'object',
             properties: {
-                filteredRewrites: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            section: { type: 'string' },
-                            original: { type: 'string' },
-                            // ADD IT HERE:
-                            verification_check: { type: 'string', description: "Verify that the rewritten bullet does not hallucinate new skills." },
-                            rewritten: { type: 'string' },
-                            rationale: { type: 'string' },
-                        },
-                        // AND UPDATE THE REQUIRED ARRAY HERE:
-                        required: ['section', 'original', 'verification_check', 'rewritten', 'rationale'],
-                        additionalProperties: false,
-                    }
-                }
+                has_new_skills: { type: 'boolean', description: "True if a new technical entity is introduced." },
+                reason: { type: 'string', description: "Brief explanation of why it was flagged or passed." },
             },
-            required: ['filteredRewrites'],
+            required: ['has_new_skills', 'reason'],
             additionalProperties: false,
         },
     },
@@ -186,27 +193,40 @@ export function applyRewritesToText(
     logger: Logger
 ): string {
     let newRawText = rawText;
+    let appliedCount = 0;
+
     for (const rewrite of rewrites) {
-        // 1. Clean the AI's original string (LLMs often strip leading bullet points like "•" or "-")
-        // We strip leading non-alphanumerics so we can match the core text.
+        // 1. Strip leading bullets/dashes the LLM might have dropped
         const coreOriginal = rewrite.original.replace(/^[^a-zA-Z0-9]+/, '').trim();
 
         const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const escapedOriginal = escapeRegex(coreOriginal);
 
-        // 2. Replace any whitespace in the AI string with a flexible whitespace matcher (\s+)
-        const flexibleRegexPattern = escapedOriginal.replace(/\s+/g, '\\s+');
+        // 2. Split into pure words and join with flexible non-alphanumeric gaps.
+        //    This makes matching immune to the LLM stripping commas or changing spacing.
+        const words = coreOriginal.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 0).map(escapeRegex);
+        if (words.length === 0) continue;
 
-        // We allow optional bullet points/garbage before the core text in the actual PDF
-        const finalRegex = new RegExp(`([^a-zA-Z0-9]*)` + flexibleRegexPattern, 'i');
+        const corePattern = words.join('[^a-zA-Z0-9]+');
 
-        const isReplaced = finalRegex.test(newRawText);
-        logger.log(`Replacing "${coreOriginal.substring(0, 20)}..." -> Success: ${isReplaced}`);
+        // 3. Word-boundary anchoring to prevent partial matches:
+        //    Prefix: line-start (with optional bullet chars) OR preceded by 1+ non-alphanumeric
+        //    Suffix: followed by non-alphanumeric OR end-of-line
+        //    Multiline flag so ^ matches after \n in PDF-extracted text
+        const finalRegex = new RegExp(
+            `(^[^a-zA-Z0-9]*|[^a-zA-Z0-9]+)` + corePattern + `(?=[^a-zA-Z0-9]|$)`,
+            'im'
+        );
 
-        // 3. Perform the replacement. We preserve the leading garbage (bullet points) ($1) and append the rewritten text.
-        if (isReplaced) {
+        const match = finalRegex.exec(newRawText);
+        if (match) {
             newRawText = newRawText.replace(finalRegex, `$1${rewrite.rewritten}`);
+            appliedCount++;
+            logger.log(`[Apply] ✓ Matched "${coreOriginal.substring(0, 50)}..." at index ${match.index}`);
+        } else {
+            logger.warn(`[Apply] ✗ FAILED to match in rawText: "${coreOriginal.substring(0, 60)}..."`);
         }
     }
+
+    logger.log(`[Apply] Applied ${appliedCount}/${rewrites.length} rewrites successfully.`);
     return newRawText;
 }
