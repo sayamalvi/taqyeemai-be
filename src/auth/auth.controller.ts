@@ -24,7 +24,6 @@ export class AuthController {
         return { message: "Login Successful" };
     }
 
-    @UseGuards(JwtAuthGuard)
     @Post('refresh')
     async refresh(@Request() req, @Res({ passthrough: true }) res: Response) {
         const refreshToken = req.cookies?.['Refresh']
@@ -34,9 +33,16 @@ export class AuthController {
             })
         }
 
-        const tokens = await this.authService.refreshTokens(req.user.userId, refreshToken)
-        this.setCookies(res, tokens.accessToken, tokens.refreshToken)
-        return { message: "Token refreshed." }
+        try {
+            const tokens = await this.authService.refreshTokens(refreshToken)
+            this.setCookies(res, tokens.accessToken, tokens.refreshToken)
+            return { message: "Token refreshed." }
+        } catch (error) {
+            res.clearCookie('Authentication')
+            res.clearCookie('Refresh')
+            return res.status(401).json({ message: "Session Expired" })
+        }
+
 
     }
 

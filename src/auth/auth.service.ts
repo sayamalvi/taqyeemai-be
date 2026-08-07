@@ -83,23 +83,29 @@ export class AuthService {
             hashedRefreshToken = await bcrypt.hash(refreshToken, salt);
         }
 
+
         await this.prisma.user.update({ where: { id: userId }, data: { hashedRefreshToken: hashedRefreshToken ?? null } })
     }
 
-    async refreshTokens(userId: string, refreshToken: string) {
-        const user = await this.prisma.user.findUnique({ where: { id: userId } })
-        if (!user || !user.hashedRefreshToken) {
-            throw new BadRequestException("Access Denied")
+    async refreshTokens(refreshToken: string) {
+        try {
+            const payload = await this.jwtService.verifyAsync(refreshToken, { secret: process.env.REFRESH_SECRET })
+            const userId = payload.sub
+            const user = await this.prisma.user.findUnique({ where: { id: userId } })
+
+            if (!user || !user.hashedRefreshToken) {
+                throw new BadRequestException("Access Denied")
+            }
+
+            const isRefreshTokenValid = await bcrypt.compare(refreshToken, user.hashedRefreshToken)
+            if (!isRefreshTokenValid) {
+                throw new BadRequestException("Access Denied")
+            }
+            const tokens = await this.getTokens(user.id, user.email)
+            await this.updateRefreshToken(user.id, tokens.refreshToken)
+            return tokens;
+        } catch (error) {
+            throw new UnauthorizedException("Invalid or expired refresh token")
         }
-        const isRefreshTokenValid = await bcrypt.compare(
-            refreshToken,
-            user.hashedRefreshToken
-        )
-        if (!isRefreshTokenValid) {
-            throw new BadRequestException("Access Denied")
-        }
-        const tokens = await this.getTokens(user.id, user.email)
-        await this.updateRefreshToken(user.id, tokens.refreshToken);
-        return tokens;
     }
 }

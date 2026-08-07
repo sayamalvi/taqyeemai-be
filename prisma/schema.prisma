@@ -9,14 +9,17 @@ datasource db {
 }
 
 model User {
-  id                 String   @id @default(uuid()) @db.Uuid
-  email              String   @unique
+  id                 String  @id @default(uuid()) @db.Uuid
+  email              String  @unique
   name               String
   passwordHash       String
   hashedRefreshToken String?
-  createdAt          DateTime @default(now())
+  credits            Int     @default(3)
+  tier               String  @default("FREE")
 
-  resumes Resume[]
+  createdAt DateTime @default(now())
+
+  resumes    Resume[]
   activities Activity[]
 }
 
@@ -27,8 +30,8 @@ model Resume {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  versions ResumeVersion[]
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions   ResumeVersion[]
   activities Activity[]
 }
 
@@ -40,8 +43,8 @@ model ResumeVersion {
   rawText       String   @db.Text
   source        String
 
-  resume   Resume    @relation(fields: [resumeId], references: [id], onDelete: Cascade)
-  analysis Analysis?
+  resume     Resume     @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  analysis   Analysis?
   activities Activity[]
 }
 
@@ -68,15 +71,15 @@ model Analysis {
 }
 
 model Activity {
-  id              String         @id @default(uuid()) @db.Uuid
-  userId          String         @db.Uuid
-  resumeId        String?        @db.Uuid
-  resumeVersionId String?        @db.Uuid
-  actionType      String         // 'UPLOAD', 'ANALYZE', 'REWRITE', 'EXPORT'
-  details         Json?          // { oldScore, newScore, rewritesApplied, etc. }
-  createdAt       DateTime       @default(now())
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  resumeId        String?  @db.Uuid
+  resumeVersionId String?  @db.Uuid
+  actionType      String // 'UPLOAD', 'ANALYZE', 'REWRITE', 'EXPORT'
+  details         Json? // { oldScore, newScore, rewritesApplied, etc. }
+  createdAt       DateTime @default(now())
 
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  resume          Resume?        @relation(fields: [resumeId], references: [id], onDelete: Cascade)
-  resumeVersion   ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume        Resume?        @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  resumeVersion ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
 }
