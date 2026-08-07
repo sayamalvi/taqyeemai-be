@@ -122,6 +122,11 @@ export class ResumeService {
       where: { resumeVersionId: versionId }
     });
 
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.credits <= 0) {
+      throw new BadRequestException('You have run out of credits! Please upgrade your plan to run more AI audits.');
+    }
+
     if (
       existingAnalysis &&
       existingAnalysis.targetRole === targetRole &&
@@ -139,10 +144,17 @@ export class ResumeService {
       const analysisData = await this.runAgenticLoop(targetRole, targetJobDescription, version.rawText, previousContext, previousRewrites);
 
       // 3. Save to Database
-      const analysisRecord = await this.saveAnalysis(versionId, targetRole, targetJobDescription, analysisData);
+      const analysisRecord = await this.prisma.$transaction(async (tx) => {
+        const record = await this.saveAnalysis(tx, versionId, targetRole, targetJobDescription, analysisData);
+        // Deduct the credit
+        await tx.user.update({
+          where: { id: userId },
+          data: { credits: { decrement: 1 } }
+        });
+        return record;
+      });
 
       await this.activityService.logAction(userId, 'ANALYZE', { targetRole, score: analysisRecord.resumeHealthScore }, id, versionId);
-
       return { analysis: analysisRecord };
     } catch (error: any) {
       this.logger.error("Error analyzing resume", error.stack);
@@ -248,8 +260,8 @@ export class ResumeService {
     // STEP 2: REWRITER (Generate)
     if (analystData.issues && analystData.issues.length > 0) {
       this.logger.log(`[Step 2: Rewriter] Generating rewrites grounded in ${knownSkills.length} known skills and ${analystData.issues.length} identified issues...`);
-      const rewriterSystemPrompt = buildRewriterSystemPrompt();
-      const rewriterUserPrompt = buildRewriterUserPrompt(rawText, knownSkills, analystData.issues);
+      const rewriterSystemPrompt = buildRewriterSystemPrompt(targetRole, targetJobDescription);
+      const rewriterUserPrompt = buildRewriterUserPrompt(rawText, knownSkills, analystData.issues, targetRole);
 
       try {
         const rewriterData = await this.llmService.analyzeText(rewriterSystemPrompt, rewriterUserPrompt, rewriterResponseFormat) as RewriterResponse;
@@ -280,8 +292,9 @@ export class ResumeService {
     };
   }
 
-  private async saveAnalysis(versionId: string, targetRole: string | undefined, targetJobDescription: string | undefined, analysisData: AnalysisResult) {
-    const analysisRecord = await this.prisma.analysis.upsert({
+  private async saveAnalysis(tx: any, versionId: string, targetRole: string | undefined, targetJobDescription: string | undefined, analysisData: AnalysisResult) {
+
+    const analysisRecord = await tx.analysis.upsert({
       where: { resumeVersionId: versionId },
       create: {
         resumeVersionId: versionId,
@@ -290,25 +303,15 @@ export class ResumeService {
         aiVerdict: analysisData.aiVerdict,
         recruiterConcerns: analysisData.recruiterConcerns,
         missingSkills: analysisData.missingSkills,
-        issues: analysisData.issues as any,
-        strengths: analysisData.strengths as any,
-        keywords: analysisData.keywords as any,
-        rewrites: analysisData.rewrites as any,
-        parsedData: analysisData.parsedData as any,
+        issues: analysisData.issues,
+        strengths: analysisData.strengths,
+        keywords: analysisData.keywords,
+        rewrites: analysisData.rewrites,
+        parsedData: analysisData.parsedData,
         resumeHealthScore: analysisData.resumeHealthScore
       },
       update: {
-        targetRole,
-        targetJobDescription,
-        aiVerdict: analysisData.aiVerdict,
-        recruiterConcerns: analysisData.recruiterConcerns,
-        missingSkills: analysisData.missingSkills,
-        issues: analysisData.issues as any,
-        strengths: analysisData.strengths as any,
-        keywords: analysisData.keywords as any,
-        rewrites: analysisData.rewrites as any,
-        parsedData: analysisData.parsedData as any,
-        resumeHealthScore: analysisData.resumeHealthScore
+        targetRole, targetJobDescription, aiVerdict: analysisData.aiVerdict, recruiterConcerns: analysisData.recruiterConcerns, missingSkills: analysisData.missingSkills, issues: analysisData.issues, strengths: analysisData.strengths, keywords: analysisData.keywords, rewrites: analysisData.rewrites, parsedData: analysisData.parsedData, resumeHealthScore: analysisData.resumeHealthScore
       }
     });
     return analysisRecord;
