@@ -108,4 +108,23 @@ export class AuthService {
             throw new UnauthorizedException("Invalid or expired refresh token")
         }
     }
+
+    async getUserProfile(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                credits: true,
+                tier: true,
+                createdAt: true
+            }
+        })
+
+        if (!user) {
+            throw new UnauthorizedException(`User with ID ${userId} not found`);
+        }
+        return user
+    }
 }
