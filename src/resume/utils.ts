@@ -223,7 +223,15 @@ export function applyRewritesToText(
             appliedCount++;
             logger.log(`[Apply] ✓ Matched "${coreOriginal.substring(0, 50)}..." at index ${match.index}`);
         } else {
-            logger.warn(`[Apply] ✗ FAILED to match in rawText: "${coreOriginal.substring(0, 60)}..."`);
+            // Fallback: If the exact word-boundary regex fails, try a direct string replacement of the core original
+            // This catches cases where the PDF text has weird hidden characters that broke the regex
+            if (newRawText.includes(rewrite.original)) {
+                newRawText = newRawText.replace(rewrite.original, rewrite.rewritten);
+                appliedCount++;
+                logger.warn(`[Apply] ⚠ Used fallback string replacement for: "${coreOriginal.substring(0, 50)}..."`);
+            } else {
+                logger.warn(`[Apply] ✗ FAILED to match in rawText entirely: "${coreOriginal.substring(0, 60)}..."`);
+            }
         }
     }
 

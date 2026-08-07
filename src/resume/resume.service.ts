@@ -5,6 +5,7 @@ import { AnalyzeResumeDto } from './dto/analyze-resume.dto';
 import { DocumentService } from 'src/document/document.service';
 import { LLMService } from 'src/llm/llm.service';
 import { ScoringService } from 'src/scoring/scoring.service';
+import { ActivityService } from 'src/activity/activity.service';
 import { analystResponseFormat, rewriterResponseFormat, applyRewritesToText } from './utils';
 import { runProgrammaticGuardrails } from './guardrails';
 import { Rewrite, AnalystResponse, RewriterResponse, AnalysisResult } from './types';
@@ -23,7 +24,8 @@ export class ResumeService {
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
     private readonly llmService: LLMService,
-    private readonly scoringService: ScoringService
+    private readonly scoringService: ScoringService,
+    private readonly activityService: ActivityService
   ) { }
 
   async create(userId: string, resume: Express.Multer.File, createResumeDto: CreateResumeDto) {
@@ -47,6 +49,16 @@ export class ResumeService {
         })
 
         const versionRecord = await transac.resumeVersion.create({ data: { resumeId: resumeRecord.id, versionNumber: 1, rawText, source: 'upload' } })
+
+        await transac.activity.create({
+          data: {
+            userId,
+            actionType: 'UPLOAD',
+            resumeId: resumeRecord.id,
+            resumeVersionId: versionRecord.id,
+            details: { title }
+          }
+        });
 
         return {
           resume: resumeRecord,
@@ -92,6 +104,9 @@ export class ResumeService {
           source: 'ai_rewrite',
         }
       });
+
+      await this.activityService.logAction(userId, 'REWRITE', { appliedRewritesCount: rewrites.length }, resumeId, newVersion.id);
+
       return { version: newVersion };
     } catch (error: any) {
       this.logger.error("Error applying rewrites", error.stack);
@@ -125,6 +140,8 @@ export class ResumeService {
 
       // 3. Save to Database
       const analysisRecord = await this.saveAnalysis(versionId, targetRole, targetJobDescription, analysisData);
+
+      await this.activityService.logAction(userId, 'ANALYZE', { targetRole, score: analysisRecord.resumeHealthScore }, id, versionId);
 
       return { analysis: analysisRecord };
     } catch (error: any) {
@@ -230,9 +247,9 @@ export class ResumeService {
 
     // STEP 2: REWRITER (Generate)
     if (analystData.issues && analystData.issues.length > 0) {
-      this.logger.log(`[Step 2: Rewriter] Generating rewrites grounded in ${knownSkills.length} known skills...`);
+      this.logger.log(`[Step 2: Rewriter] Generating rewrites grounded in ${knownSkills.length} known skills and ${analystData.issues.length} identified issues...`);
       const rewriterSystemPrompt = buildRewriterSystemPrompt();
-      const rewriterUserPrompt = buildRewriterUserPrompt(rawText, knownSkills);
+      const rewriterUserPrompt = buildRewriterUserPrompt(rawText, knownSkills, analystData.issues);
 
       try {
         const rewriterData = await this.llmService.analyzeText(rewriterSystemPrompt, rewriterUserPrompt, rewriterResponseFormat) as RewriterResponse;

@@ -10,6 +10,7 @@ import { LlmModule } from './llm/llm.module';
 import { AuthModule } from './auth/auth.module';
 import { LoggerModule } from 'nestjs-pino';
 import { ExportsModule } from './exports/exports.module';
+import { ActivityModule } from './activity/activity.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ExportsModule } from './exports/exports.module';
     LlmModule,
     AuthModule,
     ExportsModule,
+    ActivityModule,
   ],
   controllers: [AppController],
   providers: [AppService],

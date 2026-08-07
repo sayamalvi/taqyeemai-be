@@ -1,10 +1,11 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import puppeteer from 'puppeteer';
+import { ActivityService } from 'src/activity/activity.service';
 
 @Injectable()
 export class ExportsService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(private readonly prisma: PrismaService, private readonly activityService: ActivityService) { }
     async downloadPdf(userId: string, resumeId: string, versionId: string, authHeader?: string, cookieHeader?: string) {
         const analysis = await this.prisma.analysis.findUnique({
             where: { resumeVersionId: versionId }, include: { resumeVersion: { include: { resume: true } } }
@@ -36,6 +37,10 @@ export class ExportsService {
                 printBackground: true,
                 margin: { top: '0', right: '0', bottom: '0', left: '0' }
             })
+
+            // Log activity
+            await this.activityService.logAction(userId, 'EXPORT', undefined, resumeId, versionId);
+
             return new StreamableFile(Buffer.from(pdfBuffer), {
                 type: 'application/pdf',
                 disposition: `attachment; filename="Resume_Optimized.pdf"`,

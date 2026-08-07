@@ -17,6 +17,7 @@ model User {
   createdAt          DateTime @default(now())
 
   resumes Resume[]
+  activities Activity[]
 }
 
 model Resume {
@@ -28,6 +29,7 @@ model Resume {
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions ResumeVersion[]
+  activities Activity[]
 }
 
 model ResumeVersion {
@@ -40,6 +42,7 @@ model ResumeVersion {
 
   resume   Resume    @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   analysis Analysis?
+  activities Activity[]
 }
 
 model Analysis {
@@ -62,4 +65,18 @@ model Analysis {
   keywords          Json? // { present: [...], missing: [...], matchRate, total }
   rewrites          Json? // [{ section, original, rewritten, rationale }]
   createdAt         DateTime @default(now())
+}
+
+model Activity {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  resumeId        String?        @db.Uuid
+  resumeVersionId String?        @db.Uuid
+  actionType      String         // 'UPLOAD', 'ANALYZE', 'REWRITE', 'EXPORT'
+  details         Json?          // { oldScore, newScore, rewritesApplied, etc. }
+  createdAt       DateTime       @default(now())
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume          Resume?        @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  resumeVersion   ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
 }

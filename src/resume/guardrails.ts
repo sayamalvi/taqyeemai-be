@@ -30,24 +30,26 @@ export function filterDuplicateRewrites(newRewrites: Rewrite[], previousRewrites
         return { filtered: newRewrites, drops };
     }
 
-    // Hash ALL strings that the AI previously targeted or created
-    const previousTargetedSet = new Set(
-        previousRewrites.flatMap(r => [
-            normalize(r.original),
-            normalize(r.rewritten)
-        ])
-    );
-
     const filtered = newRewrites.filter(rewrite => {
-        const newOriginalNormalized = normalize(rewrite.original);
+        const newOrig = normalize(rewrite.original);
+        
+        // Fuzzy match: If the new target is a significant substring of a previous target (or vice-versa),
+        // it means the AI is caught in a loop trying to rewrite the same bullet point.
+        const isDuplicate = previousRewrites.some(prev => {
+            const prevOrig = normalize(prev.original);
+            const prevRew = normalize(prev.rewritten);
+            
+            // Only check if it's a meaningful string (at least 15 chars) to prevent false positives on short words
+            if (newOrig.length < 15) return false;
 
-        // If the AI is trying to target a string it already gave feedback on, it's looping. Drop it.
-        const isDuplicate = previousTargetedSet.has(newOriginalNormalized);
+            return prevOrig.includes(newOrig) || newOrig.includes(prevOrig) ||
+                   prevRew.includes(newOrig) || newOrig.includes(prevRew);
+        });
 
         if (isDuplicate) {
             drops.push({
                 original: rewrite.original,
-                reason: "Targets a bullet point that was already rewritten in a previous version.",
+                reason: "Fuzzy-matched as a duplicate. Targets a bullet point that was already processed in a previous version.",
                 check: 'duplicate'
             });
         }
