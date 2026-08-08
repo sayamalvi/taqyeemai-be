@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from 'generated/prisma/client';
 
-export type ActionType = 'UPLOAD' | 'ANALYZE' | 'REWRITE' | 'EXPORT';
+export type ActionType = 'UPLOAD' | 'ANALYZE' | 'REWRITE' | 'EXPORT' | 'DELETE';
 
 @Injectable()
 export class ActivityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async logAction(
     userId: string,
@@ -72,7 +72,7 @@ export class ActivityService {
       .map(([skill, count]) => ({ skill, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
-      
+
     // 3. Total rewrites applied
     const rewriteCount = await this.prisma.activity.count({
       where: { userId, actionType: 'REWRITE' },

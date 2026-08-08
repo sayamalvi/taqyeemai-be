@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseInterceptors, UploadedFile, UseGuards, Request, Header } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseInterceptors, UploadedFile, UseGuards, Request, Header, Delete } from '@nestjs/common';
 import { ResumeService } from './resume.service';
 import { CreateResumeDto } from './dto/create-resume.dto';
 import { FileInterceptor } from '@nestjs/platform-express'
@@ -36,6 +36,11 @@ export class ResumeController {
     return this.resumeService.findOne(req.user.userId, id)
   }
 
+  @Delete(':id')
+  remove(@Request() req, @Param('id') id: string) {
+    return this.resumeService.remove(req.user.userId, id);
+  }
+
   @Post(':id/rewrites')
   applyRewrites(@Request() req, @Param('id') id: string, @Body() applyRewritesDto: ApplyRewritesDto) {
     return this.resumeService.applyRewrites(req.user.userId, id, applyRewritesDto.baseVersionId, applyRewritesDto.rewrites);
@@ -45,7 +50,6 @@ export class ResumeController {
   getAnalysisForVersion(@Request() req, @Param('versionId') versionId: string) {
     return this.resumeService.getAnalysisForVersion(req.user.userId, versionId)
   }
-
 
   @Post(':id/versions/:versionId/download')
   @Header('Content-Type', 'application/pdf')

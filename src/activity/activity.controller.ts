@@ -9,11 +9,11 @@ export class ActivityController {
 
   @Get('history')
   getHistory(@Request() req: any) {
-    return this.activityService.getHistory(req.user.id);
+    return this.activityService.getHistory(req.user.userId);
   }
 
   @Get('insights')
   getInsights(@Request() req: any) {
-    return this.activityService.getInsights(req.user.id);
+    return this.activityService.getInsights(req.user.userId);
   }
 }

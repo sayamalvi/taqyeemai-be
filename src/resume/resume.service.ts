@@ -208,6 +208,22 @@ export class ResumeService {
     return resume
   }
 
+  async remove(userId: string, id: string) {
+    const resume = await this.findOne(userId, id);
+
+    await this.prisma.resume.delete({
+      where: { id }
+    });
+
+    await this.activityService.logAction(
+      userId,
+      'DELETE',
+      { title: resume.title }
+    );
+
+    return { success: true };
+  }
+
   // --- PRIVATE HELPER METHODS FOR ANALYSIS ---
 
   private async buildContext(versionId: string, resumeId: string): Promise<{ version: any, previousContext: string, previousRewrites: Rewrite[] }> {
