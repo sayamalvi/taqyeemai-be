@@ -22,13 +22,24 @@ export class ExportsService {
 
         try {
             const page = await browser.newPage();
-            const exportUrl = `http://localhost:3000/export/${resumeId}/${versionId}`; // (Notice I added resumeId here to make the API call easier on the frontend)
-            // 🔥 INJECT THE HEADERS: The robot is now wearing the user's wristband!
+            const baseUrl = process.env.FRONTEND_URL
+            const exportUrl = `${baseUrl}/export/${resumeId}/${versionId}`;
             const headersToInject: Record<string, string> = {};
             if (authHeader) headersToInject['Authorization'] = authHeader;
-            if (cookieHeader) headersToInject['Cookie'] = cookieHeader;
-
             await page.setExtraHTTPHeaders(headersToInject);
+
+            if (cookieHeader) {
+                const cookies = cookieHeader.split(';').map(pair => {
+                    const [name, ...rest] = pair.trim().split('=');
+                    return {
+                        name,
+                        value: rest.join('='),
+                        url: baseUrl
+                    };
+                });
+                await page.setCookie(...cookies);
+            }
+
             // Use networkidle2 so it doesn't hang forever waiting for Next.js dev server websockets
             await page.goto(exportUrl, { waitUntil: 'networkidle2' });
 
@@ -46,6 +57,7 @@ export class ExportsService {
                 disposition: `attachment; filename="Resume_Optimized.pdf"`,
             });
         } catch (error) {
+            console.error("PDF Generation Error:", error);
             throw new HttpException("Failed to generate PDF", HttpStatus.INTERNAL_SERVER_ERROR)
         }
         finally {

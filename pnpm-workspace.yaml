@@ -1,6 +1,6 @@
 allowBuilds:
-  '@prisma/engines': false
-  bcrypt: false
-  prisma: false
-  puppeteer: false
-  unrs-resolver: false
+  '@prisma/engines': true
+  bcrypt: true
+  prisma: true
+  puppeteer: true
+  unrs-resolver: true
